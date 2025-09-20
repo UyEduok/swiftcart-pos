@@ -12,27 +12,68 @@ from .serializers import SaleSerializer
 from django.db.models import Q
 from rest_framework.generics import UpdateAPIView
 from .serializers import UpdateOverheadSerializer
-
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.exceptions import NotFound
 
 class OverheadPagination(PageNumberPagination):
-    page_size = 100
+    page_size = 5
     page_size_query_param = "page_size"
-    max_page_size = 500
+    max_page_size = 10
+
+    def paginate_queryset(self, queryset, request, view=None):
+        try:
+            return super().paginate_queryset(queryset, request, view)
+        except NotFound:
+            # If requested page is too high, return last page
+            self.page = self.django_paginator_class(
+                queryset, self.get_page_size(request)
+            ).num_pages
+            return super().paginate_queryset(queryset, request, view)
+
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def overhead_list(request):
     """
-    Returns paginated overhead records (70 per page) to authenticated users.
+    Returns paginated overhead records to authenticated users with optional filters:
+    - from: start date
+    - to: end date
+    - overhead_type: capital/recurring
+    - category: category
+    - search: text search on description
     """
-    overheads = Overhead.objects.all().order_by('-created_at')
-    
+    queryset = Overhead.objects.all().order_by('-created_at')
+
+    # --- DATE FILTERS ---
+    start_date = request.GET.get("from")
+    end_date = request.GET.get("to")
+    if start_date:
+        queryset = queryset.filter(created_at__date__gte=start_date)
+    if end_date:
+        queryset = queryset.filter(created_at__date__lte=end_date)
+
+    # --- TYPE FILTER ---
+    overhead_type = request.GET.get("overhead_type")
+    if overhead_type:
+        queryset = queryset.filter(overhead_type=overhead_type)
+
+    # --- CATEGORY FILTER ---
+    category = request.GET.get("category")
+    if category:
+        queryset = queryset.filter(category=category)
+
+    # --- SEARCH ---
+    search_query = request.GET.get("search")
+    if search_query:
+        queryset = queryset.filter(description__icontains=search_query)
+
+    # --- PAGINATION ---
     paginator = OverheadPagination()
-    result_page = paginator.paginate_queryset(overheads, request)
+    result_page = paginator.paginate_queryset(queryset, request)
     serializer = OverheadSerializer(result_page, many=True)
-    
     return paginator.get_paginated_response(serializer.data)
+
 
 
 
@@ -129,6 +170,9 @@ def sale_list(request):
 
     # --- PAGINATION ---
     paginator = OverheadPagination()
+
+
+    # Paginate
     paginated_qs = paginator.paginate_queryset(queryset, request)
 
     serializer = SaleSerializer(paginated_qs, many=True)
@@ -138,7 +182,7 @@ def sale_list(request):
 class OverheadUpdateView(UpdateAPIView):
     queryset = Overhead.objects.all()
     serializer_class = UpdateOverheadSerializer
-    permission_classes = [IsAuthenticated]  # adjust as needed
+    permission_classes = [IsAuthenticated]  
     lookup_field = "id"
 
 
