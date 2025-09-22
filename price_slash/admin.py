@@ -6,7 +6,7 @@ from .models import DamageProduct
 class ExpiringProductAdmin(admin.ModelAdmin):
     list_display = (
         "product_name", "product_code", "initial_unit_price", "resale_price",
-        "quantity", "loss_value", "tag", "staff_name", "created_date", 'reference'
+        "quantity", "loss_value", "staff_name", "created_date", 'reference'
     )
     search_fields = ("product_name", "product_code", "reference")
     readonly_fields = ("product_code", "initial_unit_price",
@@ -26,7 +26,7 @@ class ExpiringProductAdmin(admin.ModelAdmin):
 class DamageProductAdmin(admin.ModelAdmin):
     list_display = (
         "product_name", "product_code", "initial_unit_price", "resale_price",
-        "quantity", "loss_value", "tag", "staff_name", "created_date", 'reference'
+        "quantity", "loss_value", "staff_name", "created_date", 'reference'
     )
     search_fields = ("product_name", "product_code", "reference")
 

@@ -24,8 +24,19 @@ from rest_framework import generics
 from django.db.models import Q
 from .serializers import ProductUpdateSerializer
 from datetime import datetime, time
-
-
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.decorators import api_view, throttle_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.throttling import UserRateThrottle  # or your SupplierThrottle
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+from django.db.models import Q
+from .models import StockHistory
+from .serializers import StockHistorySerializer
+from datetime import datetime
+from rest_framework import generics, permissions
+from .models import Product
+from .serializers import ProductViewSerializer
 
 class SupplierThrottle(UserRateThrottle):
     rate = '20/min'  #: 5 requests per minute
@@ -170,15 +181,8 @@ def get_units(request):
     serializer = UnitSerializer(units, many=True)
     return Response(serializer.data)
 
-from rest_framework import generics, permissions
-from .models import Product
-from .serializers import ProductViewSerializer
 
 class ProductListView(generics.ListAPIView):
-    """
-    API view to list all products (read-only).
-    Only authenticated users can access.
-    """
     queryset = Product.objects.all()
     serializer_class = ProductViewSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -207,16 +211,6 @@ def products_by_category(request):
     return Response(serializer.data)
 
 
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import api_view, throttle_classes, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.throttling import UserRateThrottle  # or your SupplierThrottle
-from rest_framework.pagination import PageNumberPagination
-from rest_framework.response import Response
-from django.db.models import Q
-from .models import StockHistory
-from .serializers import StockHistorySerializer
-from datetime import datetime
 
 @api_view(['GET'])
 @throttle_classes([SupplierThrottle])
@@ -278,13 +272,31 @@ def product_batch_list(request):
 def create_supplier(request):
     serializer = SupplierSerializer(data=request.data)
     if serializer.is_valid():
-        supplier, created = Supplier.objects.get_or_create(
-            name=serializer.validated_data['name'],
-            defaults=serializer.validated_data
-        )
-        if not created:
-            return Response({"detail": "Supplier already exists."}, status=status.HTTP_200_OK)
+        data = serializer.validated_data
+
+        # Check for duplicates by email, phone, or account_number
+        if data.get("email") and Supplier.objects.filter(email=data["email"]).exists():
+            return Response(
+                {"email": ["A supplier already exists with this email."]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if data.get("phone") and Supplier.objects.filter(phone=data["phone"]).exists():
+            return Response(
+                {"phone": ["A supplier already exists with this phone number."]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if data.get("account_number") and Supplier.objects.filter(account_number=data["account_number"]).exists():
+            return Response(
+                {"account_number": ["A supplier already exists with this account number."]},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # If no duplicates, create supplier
+        supplier = Supplier.objects.create(**data)
         return Response(SupplierSerializer(supplier).data, status=status.HTTP_201_CREATED)
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -458,7 +470,7 @@ def update_stock(request, product_id, quantity_sold):
 
 class ProductSearchAPIView(generics.ListAPIView):
     serializer_class = ProductViewSerializer
-    permission_classes = [IsAuthenticated]  # optional, remove if public
+    permission_classes = [IsAuthenticated] 
 
     def get_queryset(self):
         query = self.request.query_params.get('q', None)
@@ -499,3 +511,16 @@ class ProductReceiveAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_product_by_code(request, code):
+    """
+    Lookup a product by its product_code and return details for update form prefill.
+    """
+    try:
+        product = Product.objects.get(product_code=code)
+    except Product.DoesNotExist:
+        return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ProductViewSerializer(product)
+    return Response(serializer.data, status=status.HTTP_200_OK)

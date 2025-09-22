@@ -17,14 +17,13 @@ class ExpiringProduct(models.Model):
 
 
     # Tracking fields
-    tag = models.CharField(max_length=100, null=True, blank=True, help_text="Unique batch identifier (e.g., EXP_MARCH, BATCH2025-01-12)")
     staff = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, editable=False, related_name="expiring_created")
     staff_name = models.CharField(max_length=255, editable=False)
     last_updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, editable=False, related_name="expiring_updated")
     last_updated_name = models.CharField(max_length=255, editable=False, blank=True)
 
     created_date = models.DateTimeField(auto_now_add=True)
-    updated_date = models.DateTimeField(auto_now=True)
+    updated_date = models.DateTimeField(blank=True, null=True)
 
     note = models.TextField(blank=True, null=True)
     description = models.TextField(editable=False, blank=True, null=True)
@@ -38,7 +37,6 @@ class ExpiringProduct(models.Model):
         if not self.pk and self.product:
             self.description = self.product.description + " (EP)"
             self.expiry_date = getattr(self.product, "expiry_date", None) 
-            self.tag = self.product.tag or ""
 
         # If quantity is zero, delete instead of saving
         if self.quantity == 0:
@@ -68,7 +66,7 @@ class ExpiringProduct(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.product_name} ({self.product_code}) - {self.tag}"
+        return f"{self.product_name} ({self.product_code})"
 
 
 class DamageProduct(models.Model):
@@ -82,7 +80,6 @@ class DamageProduct(models.Model):
     loss_value = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
 
     # Tracking fields
-    tag = models.CharField(max_length=100, null=True, blank=True, help_text="Unique batch identifier (e.g., DMG_FEB, BATCH2025-03-10)")
     staff = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, editable=False, related_name="damage_created")
     staff_name = models.CharField(max_length=255, editable=False)
     last_updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, editable=False, related_name="damage_updated")
@@ -91,7 +88,8 @@ class DamageProduct(models.Model):
     description = models.TextField(editable=False, blank=True, null=True)
 
     created_date = models.DateTimeField(auto_now_add=True)
-    updated_date = models.DateTimeField(auto_now=True)
+    updated_date = models.DateTimeField(blank=True, null=True)
+
 
     note = models.TextField(blank=True, null=True)
     description = models.TextField(editable=False, blank=True, null=True)
@@ -103,7 +101,6 @@ class DamageProduct(models.Model):
         # Pull details from Product when creating
         if not self.pk and self.product:
             self.description = self.product.description + " (DP)"
-            self.tag = self.product.tag
 
         # Calculate loss value
         self.loss_value = (self.initial_unit_price - self.resale_price) * self.quantity
@@ -134,4 +131,4 @@ class DamageProduct(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.product_name} ({self.product_code}) - {self.tag}"
+        return f"{self.product_name} ({self.product_code})"

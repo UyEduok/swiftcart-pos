@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from .models import ExpiringProduct, DamageProduct
 from products.models import Product
+from django.utils import timezone
+
 
 
 class ExpiringProductSerializer(serializers.ModelSerializer):
@@ -12,10 +14,10 @@ class ExpiringProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExpiringProduct
         fields = [
-            'product',       # From frontend
-            'resale_price',  # From frontend
-            'quantity',      # From frontend
-            'note',          # From frontend
+            'product',       
+            'resale_price',  
+            'quantity',     
+            'note',        
         ]
 
     def validate(self, attrs):
@@ -42,14 +44,18 @@ class ExpiringProductSerializer(serializers.ModelSerializer):
             defaults={
                 "staff": user,
                 "product_name": product.name,
-                "initial_unit_price": product.unit_price_vat_applied or 0,
+                "initial_unit_price": product.unit_price or 0,
                 **validated_data,
             }
         )
 
         if not created:
             # Aggregate quantity
+            expiring_obj.resale_price = validated_data.get('resale_price', expiring_obj.resale_price)
             expiring_obj.quantity += validated_data.get('quantity', 0)
+            expiring_obj.last_updated_by = self.context['request'].user
+            expiring_obj.note = validated_data.get('note', expiring_obj.note)
+            expiring_obj.last_updated_date =  timezone.now()
             expiring_obj.save()
 
         return expiring_obj
@@ -65,10 +71,10 @@ class DamageProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = DamageProduct
         fields = [
-            'product',       # From frontend
-            'resale_price',  # From frontend
-            'quantity',      # From frontend
-            'note',          # From frontend
+            'product',      
+            'resale_price', 
+            'quantity',     
+            'note',       
         ]
 
     def validate(self, attrs):
@@ -92,7 +98,7 @@ class DamageProductSerializer(serializers.ModelSerializer):
             defaults={
                 "staff": user,
                 "product_name": product.name,
-                "initial_unit_price": product.unit_price_vat_applied or 0,
+                "initial_unit_price": product.unit_price or 0,
                 **validated_data,
             }
         )
@@ -103,6 +109,8 @@ class DamageProductSerializer(serializers.ModelSerializer):
             # Optionally update resale_price or note if needed
             damage_obj.resale_price = validated_data.get('resale_price', damage_obj.resale_price)
             damage_obj.note = validated_data.get('note', damage_obj.note)
+            damage_obj.last_updated_by = self.context['request'].user
+            damage_obj.last_updated_date =  timezone.now()
             damage_obj.save()
 
         return damage_obj

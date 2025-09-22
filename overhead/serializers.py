@@ -548,6 +548,17 @@ class UpdateOverheadSerializer(serializers.ModelSerializer):
             # For all other fields, skip empty string or None
             if value not in ["", None]:
                 setattr(instance, attr, value)
+            
+            from django.utils import timezone
+            request = self.context.get("request")
+            if request and request.user and request.user.is_authenticated:
+                instance.updated_by = request.user
+                instance.updated_by_name = (
+                    request.user.get_full_name() or 
+                    request.user.first_name or 
+                    request.user.username
+                )
+            instance.updated_at = timezone.now()
 
         instance.save()
         return instance

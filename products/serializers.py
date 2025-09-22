@@ -10,6 +10,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 
+
 User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
@@ -218,6 +219,13 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ['id', 'name', 'product_count']
+    
+    def validate_name(self, value):
+        # Exclude current instance when editing
+        qs = Category.objects.exclude(pk=getattr(self.instance, 'pk', None))
+        if qs.filter(name__iexact=value).exists():
+            raise serializers.ValidationError("Category with this name already exists.")
+        return value
 
 class UnitSerializer(serializers.ModelSerializer):
     class Meta:
@@ -232,9 +240,9 @@ class ProductViewSerializer(serializers.ModelSerializer):
         max_digits=10, decimal_places=2, coerce_to_string=False, read_only=True
     )
     quantity = serializers.IntegerField(read_only=True)
-    unit_buying_price = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-    markup_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
-    discount_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
+    unit_buying_price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False, read_only=True)
+    markup_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True, coerce_to_string=False)
+    discount_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True, coerce_to_string=False)
     unit = serializers.CharField(read_only=True)
     min_stock_threshold = serializers.IntegerField(read_only=True)
     discount_quantity = serializers.IntegerField(read_only=True)
@@ -314,7 +322,7 @@ class SupplierProductSupplySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SupplierProductSupply
-        fields = ['product', 'quantity_supplied', 'total_amount', 'supply_date', 'product_name', 'product_price' ]
+        fields = ["id", 'product', 'quantity_supplied', 'total_amount', 'supply_date', 'product_name', 'product_price' ]
 
 
 class SupplierSerializer(serializers.ModelSerializer):
@@ -341,6 +349,11 @@ class SupplierSerializer(serializers.ModelSerializer):
         """If account number is provided, enforce numeric only"""
         if value and not re.match(r'^\d{6,20}$', value):
             raise serializers.ValidationError("Account number must be 6–20 digits.")
+        return value
+    
+    def validate_name(self, value):
+        if value:
+            value = " ".join([word.capitalize() for word in value.split()])
         return value
 
 class ProductBatchSerializer(serializers.ModelSerializer):
@@ -374,14 +387,9 @@ class CategoryWriteSerializer(serializers.ModelSerializer):
         return value
 
 
-from django.db import transaction
-from django.db.models import F
-from django.utils import timezone
-
 class ProductUpdateSerializer(serializers.ModelSerializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), source='id')
-    supplier = serializers.PrimaryKeyRelatedField(queryset=Supplier.objects.all(), write_only=True, required=True)
-    batch = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    supplier = serializers.PrimaryKeyRelatedField(queryset=Supplier.objects.all(), write_only=True, required=False, allow_null=True)
     batch = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     expiry_date = serializers.DateField(write_only=True, required=False, allow_null=True)
     expiry_threshold = serializers.IntegerField(write_only=True, required=False, allow_null=True)
@@ -407,9 +415,6 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"batch_fields": "If any of batch, expiry_date, or expiry_threshold is provided, all three must be provided."}
             )
-
-        if not data.get("supplier"):
-            raise serializers.ValidationError({"supplier": "Supplier is required."})
 
         return data
     def update(self, instance, validated_data):

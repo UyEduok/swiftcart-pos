@@ -79,10 +79,10 @@ class Supplier(models.Model):
     email = models.EmailField(blank=True, null=True)
     bank_name = models.CharField(max_length=100, blank=True, null=True)
     account_number = models.CharField(max_length=50, blank=True, null=True)
-    badge = models.CharField(max_length=50, blank=True, null=True)  # "Top Supplier", "Normal Supplier", "Low Supplier"
+    badge = models.CharField(max_length=50, blank=True, null=True) 
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='active')
-    created_at = models.DateTimeField(auto_now_add=True)       # timestamp for creation
-    updated_at = models.DateTimeField(auto_now=True)           # timestamp for updates
+    created_at = models.DateTimeField(auto_now_add=True)     
+    updated_at = models.DateTimeField(auto_now=True)          
     
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

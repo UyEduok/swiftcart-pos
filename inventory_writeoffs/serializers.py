@@ -64,18 +64,18 @@ class ProductSerializerCal(serializers.Serializer):
     monthly_turnover = serializers.SerializerMethodField()
     monthly_losses = serializers.SerializerMethodField()
 
-
     def get_product_total_value(self, obj):
         total_value = Product.objects.aggregate(
-            total=Sum(F('quantity') *  (F('unit_price') + F('vat_value')))
+            total=Sum(F('quantity') * (F('unit_price') + F('vat_value')))
         )['total']
-        return total_value or 0
+        return float(total_value or 0)
 
     def get_total_product(self, obj):
-        return Product.objects.count()
+        return int(Product.objects.count())
 
     def get_total_in_stock(self, obj):
-        return Product.objects.filter(quantity__gt=0).count()
+        return int(Product.objects.filter(quantity__gt=0).count())
+
 
     def get_low_stock_products(self, obj):
         products = Product.objects.filter(
@@ -137,7 +137,7 @@ class ProductSerializerCal(serializers.Serializer):
         # 3️⃣ Turnover rate
         turnover_rate = monthly_sales_total / average_inventory
 
-        return round(turnover_rate, 2)
+        return float(round(turnover_rate, 2))
 
 
     def get_monthly_losses(self, obj):
@@ -169,7 +169,7 @@ class ProductSerializerCal(serializers.Serializer):
 
         # Total losses
         total_losses = writeoff_loss + expiring_loss + damage_loss
-        return round(total_losses, 2)
+        return float(round(total_losses, 2))
 
 
 

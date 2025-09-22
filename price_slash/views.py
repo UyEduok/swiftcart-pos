@@ -7,6 +7,11 @@ from .models import ExpiringProduct, DamageProduct
 from .serializers import ExpiringProductSerializer, DamageProductSerializer
 from .serializers import ExpiringProductViewSerializer, DamageProductViewSerializer
 from sales.utils import get_cashier_sales_summary
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from .models import ExpiringProduct, DamageProduct
+from .serializers import ExpiringProductViewSerializer, DamageProductViewSerializer
 
 
 
@@ -33,13 +38,6 @@ def slash_damaging_product(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from .models import ExpiringProduct, DamageProduct
-from .serializers import ExpiringProductViewSerializer, DamageProductViewSerializer
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def expiring_damaged_products(request):
@@ -55,11 +53,7 @@ def expiring_damaged_products(request):
     expiring_serializer = ExpiringProductViewSerializer(expiring_products, many=True)
     damaged_serializer = DamageProductViewSerializer(damaged_products, many=True)
 
-    # Optional summary placeholder (implement if needed)
-    summary = {}  # e.g., get_cashier_sales_summary(request.user)
-    print("Expiring Products:", expiring_serializer.data)
-    print("Damaged Products:", damaged_serializer.data)
-    print("Summary:", summary)
+    summary = {}  
 
     return Response({
         "expiring_products": expiring_serializer.data,

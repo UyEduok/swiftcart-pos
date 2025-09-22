@@ -2,7 +2,7 @@ from django.urls import path
 from .views import ProductDetailView, products_by_category, get_all_stock_history, product_batch_detail, stock_history_view,ProductReceiveAPIView
 from .views import get_suppliers, get_categories, supplier_list_with_supplies, delete_category, update_category, ProductSearchAPIView
 from .views import add_category, product_batch_list, create_supplier, ProductCreateUpdateAPIView, get_units, ProductListView
-
+from .views import get_product_by_code
 urlpatterns = [
     path('create-update/', ProductCreateUpdateAPIView.as_view(), name='product-create-update'),
     path('suppliers/', get_suppliers, name='get_suppliers'),
@@ -23,5 +23,6 @@ urlpatterns = [
     path('update-category/<int:pk>/', update_category, name='update-category'),
     path('search/', ProductSearchAPIView.as_view(), name='product-search'),
     path('receive/', ProductReceiveAPIView.as_view(), name='product-search'),
+    path("code-search-update/<str:code>/", get_product_by_code, name="get-product-by-code"),
     
 ]

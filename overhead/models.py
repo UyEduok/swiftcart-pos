@@ -57,6 +57,20 @@ class Overhead(models.Model):
         help_text="Stores creator’s name in case the user is deleted"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,  
+        null=True,
+        blank=True,
+        related_name="updated_overheads"
+    )
+    updated_by_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Stores updater’s name in case the user is deleted"
+    )
+    updated_at = models.DateTimeField(blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Auto-generate description if it's blank and category is not "others"
