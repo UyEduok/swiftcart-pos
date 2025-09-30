@@ -23,9 +23,41 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from .serializers import ProfilePictureSerializer
 from .serializers import ProfileSerializer
+from .models import Profile
+from rest_framework.throttling import SimpleRateThrottle
 
+
+class EmailRateThrottle(SimpleRateThrottle):
+    scope = "email"
+
+    def get_rate(self):
+        return "3/minute"  
+
+    def get_cache_key(self, request, view):
+        # Only throttle POST and PUT requests with 'email' in data
+        if request.method not in ("POST", "PUT"):
+            return None
+
+        email = request.data.get("email")
+        if not email:
+            return None  
+
+        # Using the email as a unique key
+        return self.cache_format % {
+            'scope': self.scope,
+            'ident': email.lower()  
+        }
+
+
+
+class PasswordChangeThrottle(UserRateThrottle):
+    rate = "5/minute"  
+
+class TokenValidateThrottle(UserRateThrottle):
+    rate = '10/minute' 
 
 class RegisterUserView(APIView):
+    throttle_classes = [EmailRateThrottle]
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
@@ -34,14 +66,16 @@ class RegisterUserView(APIView):
         return Response(serializer.errors, status=400)
 
 class CustomLoginView(APIView):
+    throttle_classes = [EmailRateThrottle]
     def post(self, request):
         serializer = CustomLoginSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             return Response(serializer.validated_data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class SendResetCodeView(APIView):
+    throttle_classes = [EmailRateThrottle]
+
     def post(self, request):
         serializer = EmailSerializer(data=request.data)
         if not serializer.is_valid():
@@ -61,13 +95,21 @@ class SendResetCodeView(APIView):
         profile.reset_code_expiry = timezone.now() + timedelta(minutes=6, seconds=10)
         profile.save()
 
-        # Send code to email
-        send_reset_code_email(user.email, code)
+        try:
+            send_reset_code_email(user.email, code)
+        except Exception as e:
+            return Response(
+                {'error': f"Failed to send email: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response({'message': 'Reset code sent to email.'}, status=status.HTTP_200_OK)
 
 
+
+#recieve reset code from user and confirm
 class VerifyResetCodeView(APIView):
+    throttle_classes = [EmailRateThrottle]
     def post(self, request):
         serializer = VerifyResetCodeSerializer(data=request.data)
         if not serializer.is_valid():
@@ -78,10 +120,9 @@ class VerifyResetCodeView(APIView):
 
         try:
             user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response({'error': 'No user found with this email.'}, status=status.HTTP_404_NOT_FOUND)
-
-        profile = user.profile
+            profile = user.profile
+        except (User.DoesNotExist, Profile.DoesNotExist):
+            return Response({'error': 'Invalid email or code.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Check if code matches
         if profile.reset_code != code:
@@ -94,70 +135,26 @@ class VerifyResetCodeView(APIView):
         return Response({'message': 'Code verified successfully.'}, status=status.HTTP_200_OK)
 
 
-class PasswordChangeView(View):
-    User = get_user_model()
-    def post(self, request):
-        try:
-            data = json.loads(request.body)
-            email = data.get("email")
-            password = data.get("password")
-            confirm_password = data.get("confirmPassword")
-
-            # 1️Validate required fields
-            if not email or not password or not confirm_password:
-                return JsonResponse({"error": "All fields are required."}, status=400)
-
-            #  Ensure new password matches confirm
-            if password != confirm_password:
-                return JsonResponse({"error": "Passwords do not match."}, status=400)
-
-            # Find the user
-            try:
-                user = User.objects.get(email=email)
-            except User.DoesNotExist:
-                return JsonResponse({"error": "User not found."}, status=404)
-
-            # Ensure the new password is not the same as the old one
-            if check_password(password, user.password):
-                return JsonResponse({"error": "New password cannot be the same as your previous password."}, status=400)
-
-            # Set and save new password
-            user.set_password(password)
-            user.save()
-
-            return JsonResponse({"message": "Password changed successfully."}, status=200)
-
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON format."}, status=400)
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
-
-
 class PasswordChangeView(APIView):
+    throttle_classes = [PasswordChangeThrottle]
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.validated_data['user']
-            new_password = serializer.validated_data['password']
-            
-            user.set_password(new_password)
-            user.save()
 
-            return Response({"message": "Password changed successfully"}, status=status.HTTP_200_OK)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        user = serializer.validated_data.get("user")
+        new_password = serializer.validated_data.get("password")
 
+        # Change password
+        user.set_password(new_password)
+        user.save()
 
+        return Response(
+            {"detail": "Password changed successfully."},
+            status=status.HTTP_200_OK
+        )
 
-class TokenValidateThrottle(UserRateThrottle):
-    rate = '10/minute' 
-
-class TokenValidateView(APIView):
-    permission_classes = [IsAuthenticated]
-    throttle_classes = [TokenValidateThrottle]
-
-    def get(self, request):
-        return Response({"detail": "Token is valid"}, status=200)
 
 
 @api_view(['POST'])
@@ -212,3 +209,10 @@ def upload_profile_picture(request):
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class TokenValidateView(APIView):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [TokenValidateThrottle]
+
+    def get(self, request):
+        return Response({"detail": "Token is valid"}, status=200)

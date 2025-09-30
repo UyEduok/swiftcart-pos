@@ -8,6 +8,8 @@ from django.contrib.auth.hashers import check_password
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
+import imghdr
+import os
 
 User = get_user_model()
 
@@ -46,6 +48,9 @@ class UserSerializer(serializers.ModelSerializer):
         if attrs['password'] != attrs['confirm_password']:
             raise serializers.ValidationError({'password': 'Passwords do not match'})
         
+        if len(attrs['password']) <= 4:
+            raise serializers.ValidationError({'password': 'Password must be longer than 4 characters'})
+
         if User.objects.filter(email=attrs['email']).exists():
             raise serializers.ValidationError({'email': 'Email is already in use'})
         
@@ -54,6 +59,15 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', {}) 
         validated_data.pop('confirm_password')
+
+        # Capitalize first_name and last_name
+        if 'first_name' in validated_data and validated_data['first_name']:
+            validated_data['first_name'] = validated_data['first_name'].strip().title()
+
+        if 'last_name' in validated_data and validated_data['last_name']:
+            validated_data['last_name'] = validated_data['last_name'].strip().title()
+
+
         user = User.objects.create_user(**validated_data)
 
    
@@ -109,46 +123,55 @@ class CustomLoginSerializer(serializers.Serializer):
             'access': str(refresh.access_token),
             'username': user.username,
             'email': user.email,
-            'role': user.profile.role if user.profile.role else '',  # empty for staff/admin
+            'role': user.profile.role if user.profile.role else '',  
             'is_staff': user.is_staff,
             'is_superuser': user.is_superuser,
             'profile_picture': profile_picture_url, 
+            'first_name': user.first_name,
+            'last_name': user.last_name,
         }
 
 
 class EmailSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+
 class VerifyResetCodeSerializer(serializers.Serializer):
     email = serializers.EmailField()
     code = serializers.CharField(max_length=6)
 
+
 class PasswordChangeSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=8)
-    confirm_password = serializers.CharField(write_only=True, min_length=8)
+    email = serializers.EmailField(write_only=True)  
+    password = serializers.CharField(write_only=True) 
+    confirm_password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        email = data.get('email')
-        password = data.get('password')
-        confirm_password = data.get('confirmPassword')
+        email = data.get("email")
+        password = data.get("password")
+        confirm_password = data.get("confirm_password")
 
-        # Check if passwords match
-        if password != confirm_password:
-            raise serializers.ValidationError("Passwords do not match.")
-
-        # Check if user exists
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
             raise serializers.ValidationError("User with this email does not exist.")
 
+        # Custom password length check
+        if len(password) < 5:
+            raise serializers.ValidationError("Password must be at least 5 characters long.")
+
+        # Check if passwords match
+        if password != confirm_password:
+            raise serializers.ValidationError("Passwords do not match.")
+
         # Check if new password is the same as the old one
         if user.check_password(password):
             raise serializers.ValidationError("New password cannot be the same as the old password.")
 
-        data['user'] = user
+        data["user"] = user
         return data
+
+
 
 class ConfirmPasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(write_only=True)
@@ -188,8 +211,8 @@ class ChangePasswordSerializer(serializers.Serializer):
     confirm_password = serializers.CharField(write_only=True)
 
     def validate_new_password(self, value):
-        if len(value) < 4:
-            raise serializers.ValidationError("New password must be at least 4 characters.")
+        if len(value) < 5:
+            raise serializers.ValidationError("New password must be at least 5 characters.")
         return value
 
     def validate(self, attrs):
@@ -235,9 +258,24 @@ class ProfilePictureSerializer(serializers.ModelSerializer):
         model = Profile
         fields = ['profile_picture']
 
+    def validate_profile_picture(self, value):
+        # 1. Check extension
+        ext = os.path.splitext(value.name)[1].lower()
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        if ext not in allowed_extensions:
+            raise serializers.ValidationError("Unsupported file extension. Use JPG, PNG, GIF, or WEBP.")
+
+        # 2. Check actual file content (not just extension)
+        file_type = imghdr.what(value)
+        if file_type not in ['jpeg', 'png', 'gif', 'webp']:
+            raise serializers.ValidationError("Uploaded file is not a valid image.")
+
+        return value
+
     def update(self, instance, validated_data):
         instance.profile_picture = validated_data.get('profile_picture', instance.profile_picture)
         instance.save()
         return instance
+
 
 

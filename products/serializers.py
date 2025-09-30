@@ -183,31 +183,32 @@ class ProductSerializer(serializers.ModelSerializer):
             product = Product.objects.create(**validated_data)
 
 
-
         # handle batch creation/update
         if batch_number:
-            # ProductBatch is imported at top; if not, import here:
-            # from .models import ProductBatch
 
-            batch, created = ProductBatch.objects.get_or_create(
+            batch, error = ProductBatch.safe_create(
                 product=product,
                 batch_number=batch_number,
-                defaults={
-                    'quantity_left': quantity_to_add,
-                    'expiry_date': expiry_date,
-                    'expiry_min_threshold_days': expiry_threshold,
-                    'created_by': user,
-                }
+                quantity_left=quantity_to_add,
+                expiry_date=expiry_date,
+                expiry_min_threshold_days=expiry_threshold,
+                created_by=user,
             )
 
-            if not created:
-                # Atomic increment + set updated_by
+            if error:
+                raise serializers.ValidationError({
+                    "batch_number": "This batch number already exists for a different product."
+                })
+
+            if batch and not batch.id:
+                # batch was not newly created — update quantity
                 ProductBatch.objects.filter(pk=batch.pk).update(
                     quantity_left=F('quantity_left') + quantity_to_add,
-                    updated_by=user
+                    updated_by=user,
+                    updated_at=timezone.now()
                 )
-                # refresh to reflect updated values if needed
                 batch.refresh_from_db()
+
 
 
         return product
@@ -366,7 +367,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
         model = ProductBatch
         fields = [
             'id', 'product', 'quantity_left', 'expiry_date', 
-            'expiry_min_threshold_days', 'mark_sold', 'mark_expired', 'status',
+            'expiry_min_threshold_days', 'mark_sold', 'mark_expired', 'status', "batch_number",
         ]
 
     def to_representation(self, instance):
@@ -449,10 +450,11 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
                         )
                     batch_obj.quantity_left = F("quantity_left") + purchased_qty
                     batch_obj.updated_by = user
+                    batch_obj.updated_at = timezone.now()
                     batch_obj.save(update_fields=["quantity_left", "updated_by", "updated_at"])
                     batch_obj.refresh_from_db(fields=["quantity_left"])
                 else:
-                    ProductBatch.objects.create(
+                    batch_obj, error = ProductBatch.safe_create(
                         product=instance,
                         batch_number=batch_number,
                         quantity_left=purchased_qty,
@@ -460,6 +462,10 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
                         expiry_min_threshold_days=expiry_threshold,
                         created_by=user,
                     )
+                    if error:
+                        raise serializers.ValidationError({
+                            "batch_number": "This batch number already exists for a different product."
+                })
 
             # 3) stock history
             if purchased_qty > 0:

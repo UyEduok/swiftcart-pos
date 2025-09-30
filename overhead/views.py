@@ -24,11 +24,17 @@ class OverheadPagination(PageNumberPagination):
         try:
             return super().paginate_queryset(queryset, request, view)
         except NotFound:
-            # If requested page is too high, return last page
-            self.page = self.django_paginator_class(
+            # Return last page if page requested is too high
+            last_page_number = self.django_paginator_class(
                 queryset, self.get_page_size(request)
             ).num_pages
+
+            request.query_params._mutable = True
+            request.query_params["page"] = last_page_number
+            request.query_params._mutable = False
+
             return super().paginate_queryset(queryset, request, view)
+
 
 
 

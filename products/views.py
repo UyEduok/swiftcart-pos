@@ -10,7 +10,7 @@ from django.db.models import Count
 from .serializers import StockHistorySerializer
 from .models import ProductBatch
 from .serializers import ProductBatchSerializer
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.throttling import UserRateThrottle
 from .serializers import StockHistoryWriteSerializer
@@ -25,9 +25,7 @@ from django.db.models import Q
 from .serializers import ProductUpdateSerializer
 from datetime import datetime, time
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.decorators import api_view, throttle_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.throttling import UserRateThrottle  # or your SupplierThrottle
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from django.db.models import Q
@@ -37,9 +35,7 @@ from datetime import datetime
 from rest_framework import generics, permissions
 from .models import Product
 from .serializers import ProductViewSerializer
-
-class SupplierThrottle(UserRateThrottle):
-    rate = '20/min'  #: 5 requests per minute
+from django.db import transaction
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -49,14 +45,8 @@ def product_batch_list(request):
     return Response(serializer.data)
 
 
-class ProductCreateUpdateThrottle(throttling.UserRateThrottle):
-    rate = '20/min'
-
-from django.db import transaction
-
 class ProductCreateUpdateAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
-    throttle_classes = [ProductCreateUpdateThrottle]
 
     def post(self, request, *args, **kwargs):
         with transaction.atomic():  # <-- atomic block starts here
@@ -157,7 +147,6 @@ class ProductCreateUpdateAPIView(APIView):
 
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def get_suppliers(request):
     suppliers = Supplier.objects.all()
@@ -165,7 +154,6 @@ def get_suppliers(request):
     return Response(serializer.data)
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def get_categories(request):
     # Annotate each category with the count of related products
@@ -174,7 +162,6 @@ def get_categories(request):
     return Response(serializer.data)
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def get_units(request):
     units = Unit.objects.all()
@@ -199,7 +186,6 @@ class ProductDetailView(generics.RetrieveAPIView):
 
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def products_by_category(request):
     category_id = request.query_params.get('category_id')
@@ -213,7 +199,6 @@ def products_by_category(request):
 
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def get_all_stock_history(request):
     stock_history = StockHistory.objects.all().order_by('-date')
@@ -259,7 +244,6 @@ def get_all_stock_history(request):
 
 
 @api_view(['GET'])
-@throttle_classes([SupplierThrottle])
 @permission_classes([IsAuthenticated])
 def product_batch_list(request):
     batches = ProductBatch.objects.all()
@@ -302,7 +286,6 @@ def create_supplier(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@throttle_classes([SupplierThrottle])
 def supplier_list_with_supplies(request):
     # Get all suppliers, prefetched supplies for efficiency
     suppliers = Supplier.objects.prefetch_related('supplies__product').all()
@@ -507,7 +490,6 @@ class ProductReceiveAPIView(APIView):
             serializer.save()
             return Response({"success": "Product updated successfully."}, status=status.HTTP_200_OK)
         else:
-            print(serializer.errors) 
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

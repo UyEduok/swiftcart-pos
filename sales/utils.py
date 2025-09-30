@@ -11,11 +11,8 @@ from reportlab.lib import colors
 from reportlab.lib.units import mm
 from io import BytesIO
 
-from io import BytesIO
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
 from django.conf import settings
+
 
 def generate_receipt(sale_data):
     buffer = BytesIO()
@@ -23,6 +20,7 @@ def generate_receipt(sale_data):
     width, height = A4
 
     logo_path = os.path.join(settings.MEDIA_ROOT, 'logo.png')
+
 
     # --- Draw faint watermark (behind everything) ---
     c.saveState()  # Save current canvas state
@@ -39,9 +37,11 @@ def generate_receipt(sale_data):
     # --- Top-left logo (bigger) ---
     top_logo_width = 200
     top_logo_height = 140
+    x_center = (width - top_logo_width) / 2  # Center horizontally
     c.drawImage(
         logo_path,
-        40, height - 90,  # top-left corner
+        x_center,  
+        height - 90,  # top-left corner
         width=top_logo_width,
         height=top_logo_height,
         preserveAspectRatio=True,
@@ -49,14 +49,17 @@ def generate_receipt(sale_data):
     )
 
     # --- Company name + address + phone (centered) ---
-    c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(width/2, height - 50, "Mac-Onella")
+    # Remove company name
+    # c.setFont("Helvetica-Bold", 16)
+    # c.drawCentredString(width/2, height - 50, "MAC-ONELA SUPPLY NETWORK")
 
+    # address and phone up
     c.setFont("Helvetica", 10)
-    c.drawCentredString(width/2, height - 65, "74 Woji Road, Rumurulu, Port Harcourt, Rivers State.")
-    c.drawCentredString(width/2, height - 80, "Phone: 08109802115, 08105759394, 07064112128")
+    c.drawCentredString(width/2, height - 50, "74 Woji Road, Rumurulu, Port Harcourt, Rivers State.")
+    c.drawCentredString(width/2, height - 65, "Phone: 08109802115, 08105759394, 07064112128")
 
-    c.line(40, height - 90, width - 40, height - 90)
+
+    c.line(40, height - 90, width - 40, height - 85)
 
     # --- Receipt info ---
     y = height - 110
@@ -107,7 +110,7 @@ def generate_receipt(sale_data):
     c.drawRightString(400, y, "Subtotal:")
     c.drawRightString(width - 50, y, f"{sale_data['subtotal']:,.2f}")
     y -= 15
-    c.drawRightString(400, y, "VAT (7.5%):")
+    c.drawRightString(400, y, "VAT")
     c.drawRightString(width - 50, y, f"{sale_data['vat']:,.2f}")
     y -= 15
     c.drawRightString(400, y, "Discount:")
@@ -127,8 +130,6 @@ def generate_receipt(sale_data):
     c.drawString(40, y, f"Reference: {sale_data['reference']}")
     y -= 20
     c.drawCentredString(width/2, y, "Thank you for shopping with us!")
-    y -= 12
-    c.drawCentredString(width/2, y, "Goods once sold cannot be returned.")
     y -= 20
     c.line(150, y, width - 150, y)
     y -= 12
@@ -141,30 +142,33 @@ def generate_receipt(sale_data):
 
 
 
-
-
-
-
+from django.utils.timezone import now, localtime
+from datetime import datetime, time
+from django.db.models import Sum
 
 def get_cashier_sales_summary(user):
-    today = now().date()
+    today_local = localtime(now()).date()
+
+    start_of_day = datetime.combine(today_local, time.min)
+    end_of_day = datetime.combine(today_local, time.max)
+
     summary = {
         'total_sales': 0,
         'top_product': {},
-        'payment_type_amounts': {'Cash': 0, 'Card': 0, 'Transfer': 0}
+        'payment_type_amounts': {}
     }
 
     try:
         sale_items = SaleItem.objects.filter(
             sale__staff=user,
-            sale__sale_date__date=today
+            sale__sale_date__range=(start_of_day, end_of_day)
         ).select_related('product', 'sale')
 
         # Total sales
         total_sales = sale_items.aggregate(total=Sum('amount'))['total'] or 0
         summary['total_sales'] = total_sales
 
-        # Top product (most quantity sold)
+        # Top product
         top_product = (
             sale_items
             .values('product__name')
@@ -174,19 +178,15 @@ def get_cashier_sales_summary(user):
         )
         summary['top_product'] = top_product or {}
 
-        # Amount per payment_type
-        payment_type_amounts = (
-            sale_items
-            .values('sale__payment_type')
-            .annotate(amount=Sum('amount'))
-        )
-        for item in payment_type_amounts:
+        # Payment type amounts
+        for item in sale_items.values('sale__payment_type').annotate(amount=Sum('amount')):
             summary['payment_type_amounts'][item['sale__payment_type']] = item['amount']
 
     except Exception as e:
         print("Error generating cashier summary:", e)
 
     return summary
+
 
 
 
@@ -206,12 +206,17 @@ def print_pdf_file(file_path, printer_name=None):
     if printer_name is None:
         printer_name = win32print.GetDefaultPrinter()
 
-    # Print PDF silently using the default PDF viewer
-    win32api.ShellExecute(
-        0,
-        "print",
-        file_path,
-        f'/d:"{printer_name}"',
-        ".",
-        0
-    )
+    try:
+        # Silent print using the default PDF viewer registered in Windows
+        win32api.ShellExecute(
+            0,
+            "print",
+            file_path,
+            f'/d:"{printer_name}"',
+            ".",
+            0
+        )
+        print(f"Sent '{file_path}' to printer '{printer_name}'.")
+    except Exception as e:
+        print(f"Failed to print file: {e}")
+

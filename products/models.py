@@ -31,6 +31,17 @@ class Category(models.Model):
 class Unit(models.Model):
     name = models.CharField(max_length=100, unique=True)
 
+    def clean(self):
+        if self.name:
+            self.name = self.name.lower()
+
+            if Unit.objects.exclude(pk=self.pk).filter(name=self.name).exists():
+                raise ValidationError({'name': f'A unit with the name "{self.name}" already exists.'})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # run clean() before saving
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.name
 
@@ -157,12 +168,12 @@ class Product(models.Model):
         max_digits=10,
         decimal_places=2,
         default=Decimal("0.00"),
-        help_text="Discount amount per unit"
+        help_text="Discount amount per discount quantity"
     )
     
     discount_quantity = models.PositiveIntegerField(
         default=0,
-        help_text="Minimum quantity required for discount"
+        help_text="Quantity required for discount"
     )
 
 
@@ -202,25 +213,41 @@ class Product(models.Model):
         if not self.apply_vat:
             self.vat_value = Decimal("0.00")
 
-    def save(self, *args, **kwargs):
 
+    def save(self, *args, **kwargs):
+        # Set created_by_name and updated_by_name
         if not self.pk and self.created_by:
             self.created_by_name = self.created_by.get_full_name() or self.created_by.username
-        
         if self.pk and self.updated_by:
             self.updated_by_name = self.updated_by.get_full_name() or self.updated_by.username
 
-        if not self.description:
-            if self.measurement_value and self.measurement_unit and self.unit:
-                self.description = f"{self.name} {self.measurement_value}{self.measurement_unit} {self.unit}"
-        
-        # Calculate markup percentage if not provided
-        if not self.markup_percentage and self.unit_buying_price and self.unit_price:
-            self.markup_percentage = ((self.unit_price - self.unit_buying_price) / self.unit_buying_price * 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # Generate description if missing
+        if not self.description and self.measurement_value and self.measurement_unit and self.unit:
+            self.description = f"{self.name} {self.measurement_value}{self.measurement_unit} {self.unit}"
 
-        # Calculate discount percentage if discount > 0
-        if self.discount > 0 and self.unit_price:
-            self.discount_percentage = (self.discount / self.unit_price * 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # 1. Calculate unit price if markup percentage exists
+        if self.unit_buying_price is not None and self.markup_percentage is not None:
+            self.unit_price = (
+                self.unit_buying_price * (1 + self.markup_percentage / 100)
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 2. Calculate markup percentage if not provided
+        elif not self.markup_percentage and self.unit_buying_price and self.unit_price:
+            self.markup_percentage = (
+                (self.unit_price - self.unit_buying_price) / self.unit_buying_price * 100
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 3. Calculate discount if discount percentage exists
+        if self.unit_price is not None and self.discount_percentage is not None:
+            self.discount = (
+                self.unit_price * self.discount_percentage / 100
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 4. Calculate discount percentage if missing
+        elif self.discount > 0 and self.unit_price:
+            self.discount_percentage = (
+                self.discount / self.unit_price * 100
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         super().save(*args, **kwargs)
 
@@ -228,9 +255,10 @@ class Product(models.Model):
         return f"{self.name} ({self.product_code})"
 
 
+
 class ProductBatch(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="batches")
-    batch_number = models.CharField(max_length=100, unique=True)  # unique globally
+    batch_number = models.CharField(max_length=100, unique=True)  
     quantity_left = models.PositiveIntegerField()
     expiry_date = models.DateField(blank=True, null=True)
     expiry_min_threshold_days = models.PositiveIntegerField(blank=True, null=True)
@@ -241,10 +269,29 @@ class ProductBatch(models.Model):
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="batches_updated", on_delete=models.SET_NULL, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     def __str__(self):
         return f"{self.product.name} - Batch {self.batch_number}"
+
+    def clean(self):
+        existing = ProductBatch.objects.filter(batch_number=self.batch_number).exclude(product=self.product)
+        if existing.exists():
+            raise ValidationError({
+                "batch_number": "This batch number already exists for a different product."
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # runs clean() automatically every time
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def safe_create(cls, **kwargs):
+        try:
+            batch = cls.objects.create(**kwargs)
+            return batch, None
+        except ValidationError as e:
+            return None, e
 
     @property
     def status(self):

@@ -5,6 +5,7 @@ from .models import Product, Category, Supplier, Unit
 from django.utils import timezone
 today = timezone.now().date()
 
+
 # Change the text in the top-left corner of admin
 admin.site.site_header = "SwiftCart Administration"
 
@@ -15,8 +16,25 @@ admin.site.site_title = "SwiftCart Admin Portal"
 admin.site.index_title = "Welcome to SwiftCart Admin"
 
 # Set the URL that the "View Site" button points to
-admin.site.site_url = "http://localhost:5173/inventory-dashboard"
+admin.site.site_url = "http://localhost:8000/inventory-dashboard"
 
+
+@admin.register(Category)
+class CategoryAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # Disable deletion
+
+
+@admin.register(Unit)
+class UnitAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # Disable deletion
 
 
 class SupplierProductSupplyInline(admin.TabularInline):
@@ -27,8 +45,8 @@ class SupplierProductSupplyInline(admin.TabularInline):
 class ProductAdmin(admin.ModelAdmin):
     inlines = [SupplierProductSupplyInline]
     list_display = (
-        "product_code", "name", "unit_price", "discount", "discount_quantity", "quantity", "min_stock_threshold", 
-        "vat_value", "created_at"
+        "product_code", "name", "unit_price", "discount", "discount_quantity", "quantity",  "min_stock_threshold", "min_stock_threshold",
+        "vat_value", 
     )
     list_filter = ("category","apply_vat", "expiry_date")
     search_fields = ("product_code", "name", "description")
@@ -82,6 +100,15 @@ class ProductAdmin(admin.ModelAdmin):
     product_image_preview.allow_tags = True
     product_image_preview.short_description = "Image Preview"
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.quantity == 0:
+            return True
+        return False
+
+
     def save_model(self, request, obj, form, change):
         if not change:
             # On create
@@ -93,25 +120,21 @@ class ProductAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
 
 
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name",)
-    search_fields = ("name",)
-
-
-@admin.register(Unit)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name",)
-    search_fields = ("name",)
-
-
 @admin.register(ProductBatch)
 class ProductBatchAdmin(admin.ModelAdmin):
-    list_display = ("product",  "batch_number", "quantity_left", "expiry_date", "expiry_status", "created_at", "created_by",)
+    list_display = (
+        "product", "batch_number", "quantity_left", "expiry_date",
+        "expiry_status", "created_at", "created_by",
+    )
     list_filter = ("expiry_date", "product")
     search_fields = ("batch_number", "product__name", "product__product_code")
     ordering = ("expiry_date",)
     readonly_fields = ("created_at", "updated_at", "created_by", "updated_by")
+
+    fields = (
+        "product", "batch_number", "quantity_left", "expiry_date",
+        "expiry_min_threshold_days", "created_at", "updated_at", "created_by", "updated_by"
+    )
 
     def expiry_status(self, obj):
         """Show a color-coded expiry status."""
@@ -129,14 +152,25 @@ class ProductBatchAdmin(admin.ModelAdmin):
             return format_html('<span style="color:orange; font-weight:bold;">Near Expiry</span>')
         return format_html('<span style="color:green;">Good</span>')
 
-
-
     def save_model(self, request, obj, form, change):
-        """Automatically set created_by and updated_by."""
+        """Automatically set created_by, updated_by, created_at, updated_at, and validate mandatory fields."""
         if not obj.pk:  # New batch
             obj.created_by = request.user
+            obj.created_at = timezone.now()
+
+            # Enforce mandatory fields
+            required_fields = [
+                "product", "batch_number", "quantity_left", "expiry_date", "expiry_min_threshold_days"
+            ]
+            missing = [field for field in required_fields if not getattr(obj, field, None)]
+            if missing:
+                raise ValueError(f"Missing required fields for creation: {', '.join(missing)}")
+
         obj.updated_by = request.user
+        obj.updated_at = timezone.now()
+
         super().save_model(request, obj, form, change)
+
 
 
 

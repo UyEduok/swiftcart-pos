@@ -4,35 +4,38 @@ from .models import Sale, SaleItem, Customer, Receipt
 
 class SaleItemInline(admin.TabularInline):
     model = SaleItem
-    extra = 0  # no empty extra rows
-    can_delete = False  # prevent deletion
+    extra = 0
+    can_delete = False
     readonly_fields = (
-        "product", "quantity", "unit_price", "vat_value", "discount_value","cost_price", "profit", "amount", "sale_type"
+        "product", "quantity", "unit_price", "vat_value", "discount_value",
+        "cost_price", "profit", "amount", "sale_type"
     )
 
-    # disable the add button completely
     def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
 @admin.register(Sale)
 class SaleAdmin(admin.ModelAdmin):
-    list_display = ("id", "customer", "staff", "total_amount", "sale_date", 'reference')
-    readonly_fields = ("reference", "total_cost", "total_vat", "total_discount", "total_amount", "total_profit", "payment_type", "staff", "staff_name", "sale_date", 
-    "customer")
+    list_display = ("id", "customer", "staff", "total_amount", "sale_date", "reference")
+    readonly_fields = (
+        "reference", "total_cost", "total_vat", "total_discount", "total_amount",
+        "total_profit", "payment_type", "staff", "staff_name", "sale_date", "customer"
+    )
     list_filter = ("sale_date", "staff_name", "payment_type")
-    search_fields = ("customer__name", "staff_name", 'reference')
+    search_fields = ("customer__name", "staff_name", "reference")
     inlines = [SaleItemInline]
 
+    def has_add_permission(self, request):
+        return False
 
-    def save_model(self, request, obj, form, change):
-        if not change:
-            # On create: assign creator (staff) and staff_name
-            if not obj.staff:
-                obj.staff = request.user
-            if obj.staff and not obj.staff_name:
-                obj.staff_name = obj.staff.get_full_name() or obj.staff.username
+    def has_change_permission(self, request, obj=None):
+        return False
 
-        super().save_model(request, obj, form, change)
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Receipt)
@@ -42,13 +45,33 @@ class ReceiptAdmin(admin.ModelAdmin):
     search_fields = ("sales_reference", "receipt_number")
     ordering = ("-created_at",)
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 
 @admin.register(SaleItem)
 class SaleItemAdmin(admin.ModelAdmin):
     list_display = ("sale", "product", "quantity", "unit_price", "amount")
-    readonly_fields = ("sale", "amount", "product", "quantity","cost_price", "unit_price", "discount_value", "vat_value", "profit", "sale_type")
+    readonly_fields = (
+        "sale", "amount", "product", "quantity",
+        "cost_price", "unit_price", "discount_value", "vat_value", "profit", "sale_type"
+    )
     list_filter = ("sale_type",)
     search_fields = ("product__name",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 
 @admin.register(Customer)

@@ -31,7 +31,29 @@ class OverheadTotalsSerializer(serializers.Serializer):
     capital_overhead_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
     recurring_prev_month_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
     recurring_current_month_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
+    recurring_all_time_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
+    recurring_trend = serializers.ListField()
     grand_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
+    recurring_elapsed_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
+    elapsed_grand_total = serializers.DecimalField(max_digits=12, decimal_places=2, coerce_to_string=False)
+
+    @staticmethod
+    def variable_total(year, month):
+        total = 0
+        qs = Overhead.objects.filter(overhead_type="recurring")
+        for oh in qs:
+            duration = oh.duration or 1
+            share = oh.amount / duration
+            start_month = oh.created_at.month
+            start_year = oh.created_at.year
+            months = [
+                (start_year + (start_month - 1 + i) // 12,
+                 (start_month - 1 + i) % 12 + 1)
+                for i in range(duration)
+            ]
+            if (year, month) in months:
+                total += share
+        return total
 
     @staticmethod
     def calculate_totals():
@@ -39,31 +61,63 @@ class OverheadTotalsSerializer(serializers.Serializer):
         prev_month = now.month - 1 or 12
         prev_year = now.year if now.month > 1 else now.year - 1
 
-        capital_total = Overhead.objects.filter(overhead_type="capital").aggregate(total=Sum("amount"))["total"] or 0
+        # Capital
+        capital_total = Overhead.objects.filter(
+            overhead_type="capital"
+        ).aggregate(total=Sum("amount"))["total"] or 0
 
-        def variable_total(year, month):
-            total = 0
-            qs = Overhead.objects.filter(overhead_type="recurring", created_at__year=year, created_at__month=month)
-            for oh in qs:
-                duration = oh.duration or 1
-                share = oh.amount / duration
-                start_month = oh.created_at.month
-                start_year = oh.created_at.year
-                months = [(start_year + (start_month - 1 + i)//12, (start_month - 1 + i)%12 + 1) for i in range(duration)]
-                if (year, month) in months:
-                    total += share
-            return total
+        # Recurring (current + prev)
+        recurring_prev = OverheadTotalsSerializer.variable_total(prev_year, prev_month)
+        recurring_current = OverheadTotalsSerializer.variable_total(now.year, now.month)
 
-        recurring_prev = variable_total(prev_year, prev_month)
-        recurring_current = variable_total(now.year, now.month)
+        # 6-month trend
+        recurring_trend = []
+        months_back = 6
+        for i in range(months_back - 1, -1, -1):
+            target_month = now.month - i
+            target_year = now.year
+            if target_month <= 0:
+                target_month += 12
+                target_year -= 1
+            recurring_trend.append(OverheadTotalsSerializer.variable_total(target_year, target_month))
 
+        # All-time committed recurring total
+        recurring_all_time = 0
+        qs = Overhead.objects.filter(overhead_type="recurring")
+        for oh in qs:
+            duration = oh.duration or 1
+            share = oh.amount / duration
+            recurring_all_time += share * duration   
+
+        # All-time elapsed recurring total
+        recurring_elapsed_total = 0
+        for oh in qs:
+            duration = oh.duration or 1
+            share = oh.amount / duration
+            start_month = oh.created_at.month
+            start_year = oh.created_at.year
+            months = [
+                (start_year + (start_month - 1 + i) // 12,
+                 (start_month - 1 + i) % 12 + 1)
+                for i in range(duration)
+            ]
+            for (y, m) in months:
+                if (y < now.year) or (y == now.year and m <= now.month):
+                    recurring_elapsed_total += share
+
+        # Totals
         grand_total = Overhead.objects.aggregate(total=Sum("amount"))["total"] or 0
+        elapsed_grand_total = capital_total + recurring_elapsed_total
 
         return {
             "capital_overhead_total": capital_total,
             "recurring_prev_month_total": recurring_prev,
             "recurring_current_month_total": recurring_current,
-            "grand_total": grand_total
+            "recurring_all_time_total": recurring_all_time,    
+            "recurring_elapsed_total": recurring_elapsed_total, 
+            "recurring_trend": recurring_trend,
+            "grand_total": grand_total,                        
+            "elapsed_grand_total": elapsed_grand_total,         
         }
 
 
@@ -158,9 +212,18 @@ class OverheadCreateSerializer(serializers.ModelSerializer):
 class DashboardSummarySerializer(serializers.Serializer):
     discount_current_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
     discount_previous_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
-    profit_current_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
-    profit_previous_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
-    profit_all_time = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    revenue_all_time = serializers.DecimalField(max_digits=15, decimal_places=2, coerce_to_string=False)
+    # Gross Profit
+    gross_profit_current_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    gross_profit_previous_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    gross_profit_all_time = serializers.DecimalField(max_digits=15, decimal_places=2, coerce_to_string=False)
+    # Operating Profit
+    operating_profit_current_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    operating_profit_previous_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
+    operating_profit_all_time = serializers.DecimalField(max_digits=15, decimal_places=2, coerce_to_string=False)
+    # Net Profit
+    net_profit_all_time = serializers.DecimalField(max_digits=15, decimal_places=2, coerce_to_string=False)
+
 
     top_products = serializers.ListField()
     worst_products = serializers.ListField()
@@ -170,6 +233,9 @@ class DashboardSummarySerializer(serializers.Serializer):
     overhead_trend = serializers.ListField()
     sales_count_trend = serializers.ListField()
     items_sold_trend = serializers.ListField()
+
+    operating_profit_trend = serializers.ListField()
+    gross_profit_trend = serializers.ListField()
 
     total_sale_current_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
     total_sale_previous_month = serializers.DecimalField(max_digits=14, decimal_places=2, coerce_to_string=False)
@@ -197,18 +263,28 @@ class DashboardSummarySerializer(serializers.Serializer):
         ).aggregate(total=Sum('total_discount'))['total'] or 0
 
         # 2. Profit
-        profit_current = Sale.objects.filter(
+        # --- Current month ---
+        gross_profit_current_month = Sale.objects.filter(
             sale_date__year=current_year, sale_date__month=current_month
-        ).aggregate(total=Sum('total_profit'))['total'] or 0
-        profit_current -= overheads['recurring_current_month_total']
+        ).aggregate(total=Sum("total_profit"))["total"] or 0
 
-        profit_prev = Sale.objects.filter(
+        operating_profit_current_month = gross_profit_current_month - overheads["recurring_current_month_total"]
+
+        # --- Previous month ---
+        gross_profit_previous_month = Sale.objects.filter(
             sale_date__year=prev_year, sale_date__month=prev_month
-        ).aggregate(total=Sum('total_profit'))['total'] or 0
-        profit_prev -= overheads['recurring_prev_month_total']
+        ).aggregate(total=Sum("total_profit"))["total"] or 0
 
-        profit_all_time = Sale.objects.aggregate(total=Sum('total_profit'))['total'] or 0
-        profit_all_time -= overheads['grand_total']
+        operating_profit_previous_month = gross_profit_previous_month - overheads["recurring_prev_month_total"]
+
+        # --- All time ---
+        gross_profit_all_time = Sale.objects.aggregate(total=Sum("total_profit"))["total"] or 0
+        operating_profit_all_time = gross_profit_all_time - overheads["recurring_elapsed_total"] 
+        net_profit_all_time = gross_profit_all_time - overheads["elapsed_grand_total"]
+
+
+        # All-time revenue (sum of all sales amounts)
+        revenue_all_time = Sale.objects.aggregate(total=Sum('total_amount'))['total'] or 0
 
         # 3. Top & Worst Products
         # Annotate SaleItems with product metrics
@@ -249,7 +325,6 @@ class DashboardSummarySerializer(serializers.Serializer):
         ).aggregate(total=Sum("quantity"))["total"] or 0
 
 
-
         # Sort for top 10 by quantity_sold
         top_products = sorted(products_agg, key=lambda x: x['quantity_sold'], reverse=True)[:10]
         worst_products = sorted(products_agg, key=lambda x: x['quantity_sold'])[:10]
@@ -263,6 +338,9 @@ class DashboardSummarySerializer(serializers.Serializer):
         labels = []
         sales_count_trend = []
         items_sold_trend = []
+        gross_profit_trend = []
+        operating_profit_trend = []
+
 
 
         def variable_total(year, month):
@@ -286,7 +364,7 @@ class DashboardSummarySerializer(serializers.Serializer):
             target_month = current_month - i
             target_year = current_year
 
-            if target_month <= 0:  # wrap into previous year
+            if target_month <= 0:
                 target_month += 12
                 target_year -= 1
 
@@ -298,19 +376,23 @@ class DashboardSummarySerializer(serializers.Serializer):
                 sale_date__month=target_month
             )
 
+            # --- Gross profit ---
+            gross_profit = month_sales.aggregate(total=Sum("total_profit"))["total"] or 0
+
+            # --- Overheads ---
+            recurring_overhead = OverheadTotalsSerializer.variable_total(target_year, target_month)
+
+            # --- Operating profit (Gross - recurring overhead) ---
+            operating_profit = gross_profit - recurring_overhead
+
+            # --- Discounts ---
             month_discount = month_sales.aggregate(total=Sum("total_discount"))["total"] or 0
-            month_profit = month_sales.aggregate(total=Sum("total_profit"))["total"] or 0
 
-            # recurring overhead for this month
-            month_overhead = variable_total(target_year, target_month)
-
-            # net profit = profit - recurring overhead
-            net_profit = month_profit - month_overhead
-
+            # Append to trend lists
+            gross_profit_trend.append(gross_profit)
+            operating_profit_trend.append(operating_profit)
+            overhead_trend.append(recurring_overhead)
             discount_trend.append(month_discount)
-            profit_trend.append(net_profit)
-            overhead_trend.append(month_overhead)
-
 
             # Count number of sales (transactions/orders)
             month_sales_count = month_sales.count()
@@ -321,18 +403,14 @@ class DashboardSummarySerializer(serializers.Serializer):
                 sale__sale_date__month=target_month
             ).aggregate(total=Sum("quantity"))["total"] or 0
 
-
-
             sales_count_trend.append(month_sales_count)
             items_sold_trend.append(month_items_sold)
+
 
 
         return {
             "discount_current_month": discount_current,
             "discount_previous_month": discount_prev,
-            "profit_current_month": profit_current,
-            "profit_previous_month": profit_prev,
-            "profit_all_time": profit_all_time,
             "total_sale_current_month": current_month_sales_revenue,
             "total_sale_previous_month": previous_month_sales_revenue,
             "total_unit_sold_current": current_month_sales_units,
@@ -345,6 +423,16 @@ class DashboardSummarySerializer(serializers.Serializer):
             "overhead_trend": overhead_trend,
             "sales_count_trend": sales_count_trend,
             "items_sold_trend": items_sold_trend,
+            "revenue_all_time": revenue_all_time,
+            "gross_profit_current_month": gross_profit_current_month,
+            "gross_profit_previous_month": gross_profit_previous_month,
+            "operating_profit_previous_month": operating_profit_previous_month,
+            "operating_profit_current_month": operating_profit_current_month,
+            "gross_profit_trend": gross_profit_trend,
+            "operating_profit_trend": operating_profit_trend,
+            "net_profit_all_time": net_profit_all_time,
+            "operating_profit_all_time": operating_profit_all_time,
+            "gross_profit_all_time": gross_profit_all_time,
         }
 
 

@@ -110,10 +110,10 @@ def validate_cart(request):
 
                 discount_quantity = int(getattr(product_instance, "discount_quantity", 0))
 
-                # Apply discount only if product has discount_quantity set and request meets/exceeds it
-                if discount_quantity > 0 and requested_qty >= discount_quantity:
-                    discount = float(getattr(product_instance, "discount", 0.0)) * requested_qty
-                    print(f"Applied discount: {discount} for product {product_instance.id} with quantity {discount_quantity}")
+                # Apply discount only if product has discount_quantity set
+                if discount_quantity > 0:
+                    full_blocks = requested_qty // discount_quantity
+                    discount = float(getattr(product_instance, "discount", 0.0)) * full_blocks
 
                 # VAT (per unit × qty)
                 vat = 0.0
@@ -323,7 +323,7 @@ def create_sale(request):
             subtotal += amount
             items_list.append({
                 "description": f"{item.product.description} {' (EP)' if item.sale_type == 'expiring' else ' (DM)' if item.sale_type == 'damaged' else ''}",
-                "qty": item.quantity,
+                "qty": f"{item.quantity}{getattr(item.product.unit, 'name', '')}{'s' if item.quantity > 1 and getattr(item.product.unit, 'name', '') else ''}",
                 "unit_price": item.unit_price,
                 "amount": amount,
             })
@@ -384,13 +384,17 @@ def create_sale(request):
         # Build URL for browser access
         receipt_url = request.build_absolute_uri(receipt.file.url)
 
+        try:
+            file_path = receipt.file.path  
+            print_pdf_file(file_path)  
+            print(file_path)
+        except Exception as e:
+            print(f"Printing failed: {e}")
 
         try:
             summary = get_cashier_sales_summary(user)
         except Exception as e:
             summary = {}
-            print("Error generating summary:", e)
-
         return Response({
             "success": True,
             "message": "Sale created successfully",

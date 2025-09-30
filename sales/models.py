@@ -137,6 +137,8 @@ class SaleItem(models.Model):
     vat_value = models.DecimalField(max_digits=14, decimal_places=2, editable=False, default=Decimal('0.00'))
     discount_value = models.DecimalField(max_digits=14, decimal_places=2, editable=False, default=Decimal('0.00'))
     amount = models.DecimalField(max_digits=14, decimal_places=2, editable=False, default=Decimal('0.00'))
+    expiring_product_id = models.PositiveIntegerField(null=True, blank=True, editable=False)
+    damage_product_id = models.PositiveIntegerField(null=True, blank=True, editable=False)
     profit = models.DecimalField(max_digits=14, decimal_places=2, editable=False, default=Decimal('0.00'))
     sale_type = models.CharField(
         max_length=20,

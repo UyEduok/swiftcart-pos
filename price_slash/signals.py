@@ -27,7 +27,6 @@ def expiring_product_changed(sender, instance, created, **kwargs):
         "resale_price": float(instance.resale_price or 0),
         "quantity": instance.quantity or 0,
         "loss_value": float(instance.loss_value or 0),
-        "expiry_date": instance.expiry_date.strftime("%Y-%m-%d") if instance.expiry_date else "",
         "staff_name": instance.staff_name or "",
         "created_date": instance.created_date.strftime("%Y-%m-%d %H:%M:%S") if instance.created_date else "",
         "note": instance.note or "",

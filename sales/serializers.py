@@ -12,6 +12,7 @@ from django.db import transaction
 from rest_framework import serializers
 from .models import Sale, SaleItem, Product, Receipt
 from price_slash.models import DamageProduct, ExpiringProduct
+import re
 
 
 
@@ -61,22 +62,56 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Customer
         fields = ['id', 'name', 'phone', 'email', 'address', 'status',
-                  'created_by', 'updated_by', 'created_by', 'updated_by',
-                  'created_at', 'updated_at', 'badge']
+                  'created_by', 'updated_by', 'created_at', 'updated_at', 'badge']
         read_only_fields = ['id', 'status', 'created_by', 'updated_by', 
-                            'created_by', 'updated_by', 'created_at', 'updated_at', 'badge']
+                            'created_at', 'updated_at', 'badge']
+
+    def validate_phone(self, value):
+        """Validate numeric pattern if phone is provided and check uniqueness"""
+        if value:
+            # Enforce numeric pattern
+            if not re.match(r'^\+?\d{7,15}$', value):
+                raise serializers.ValidationError(
+                    "Phone number must be between 7–15 digits and may start with '+'."
+                )
+            # Check uniqueness (exclude self on update)
+            if Customer.objects.filter(phone=value).exclude(id=getattr(self.instance, 'id', None)).exists():
+                raise serializers.ValidationError(
+                    "Another customer is already registered with this phone number."
+                )
+        return value
+    
+    def validate_name(self, value):
+        """Capitalize each word in the customer's name"""
+        if value:
+            return value.strip().title()
+        return value
+
+
+    def validate_email(self, value):
+        """Validate email format if provided and check uniqueness"""
+        if value:
+            # Enforce proper email format
+            if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', value):
+                raise serializers.ValidationError("Invalid email format.")
+            # Check uniqueness (exclude self on update)
+            if Customer.objects.filter(email=value).exclude(id=getattr(self.instance, 'id', None)).exists():
+                raise serializers.ValidationError(
+                    "Another customer is already registered with this email."
+                )
+        return value
 
     def create(self, validated_data):
         user = self.context['request'].user
         validated_data['created_by'] = user
         validated_data['updated_by'] = user
-        # Names will auto-populate from save() in model
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
         instance.updated_by = self.context['request'].user
-        # updated_by_name will auto-populate from save() in model
         return super().update(instance, validated_data)
+
+
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -156,26 +191,27 @@ class SaleItemSerializer(serializers.ModelSerializer):
         discount = Decimal("0.00")
 
         # Apply discount only if quantity meets/exceeds discount_quantity
-        if validated_data["quantity"] >= product.discount_quantity and product.discount_quantity > 0:
-            discount = product.discount
+        discount = Decimal("0.00")
+
+        if sale_type == "sales":
+            if validated_data["quantity"] >= product.discount_quantity and product.discount_quantity > 0:
+                discount = product.discount
 
         validated_data["cost_price"] = cost_price
         validated_data["profit"] = (
             (validated_data["unit_price"] - cost_price - discount) * validated_data["quantity"]
         )
 
+        if temp_expiring_id:
+            validated_data["expiring_product_id"] = temp_expiring_id
+        if temp_damage_id:
+            validated_data["damage_product_id"] = temp_damage_id
+
 
 
         # Create SaleItem
         sale_item = SaleItem.objects.create(**validated_data)
 
-        # Attach temporary IDs for view usage (not saved to DB)
-        if temp_expiring_id:
-            sale_item.expiring_product_id = temp_expiring_id
-        if temp_damage_id:
-            sale_item.damage_product_id = temp_damage_id
-        print(f"Receipt amount (from frontend/raw): {receipt_amount}")
-        print(f"Amount (DB value): {db_amount}")
         return sale_item
 
 

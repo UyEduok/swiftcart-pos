@@ -1,10 +1,14 @@
-
 from django.contrib import admin
-from django.urls import path
 from django.conf import settings
-from django.conf.urls.static import static
-from django.urls import path, include 
+from django.urls import path, include, re_path
 from users.views import TokenValidateView
+from products.consumers import InventoryConsumer
+from .views import index
+from django.views.static import serve
+import socket
+
+host_ip = socket.gethostbyname(socket.gethostname())
+admin.site.site_url = f"http://{host_ip}:8000/inventory-dashboard"
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -15,8 +19,12 @@ urlpatterns = [
     path('api/price-slash/', include('price_slash.urls')),
     path('api/sales/', include('sales.urls')),
     path('api/overheads/', include('overhead.urls')),
-    
+    re_path(r'ws/inventory/$', InventoryConsumer.as_asgi()),  
+    path("", index, name="index"),
+    path("inventory-dashboard/", index, name="inventory-dashboard"),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+urlpatterns += [
+    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+]
