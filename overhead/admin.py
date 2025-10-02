@@ -15,6 +15,12 @@ class OverheadAdmin(admin.ModelAdmin):
         "created_at",
     )
 
+    # Add filter by type
+    list_filter = ("overhead_type",)
+
+    # Default sort by date (newest first)
+    ordering = ("-created_at",)
+
     # Make all fields read-only
     readonly_fields = [f.name for f in Overhead._meta.fields]
 

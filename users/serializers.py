@@ -5,12 +5,21 @@ from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
-from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 import imghdr
 import os
+from django.conf import settings
+import logging
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
+from django.core.exceptions import MultipleObjectsReturned
+from django.db import transaction
+from django.core.files.storage import default_storage
 
+
+logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -79,6 +88,8 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
 
+
+
 class CustomLoginSerializer(serializers.Serializer):
     identifier = serializers.CharField()  
     password = serializers.CharField(write_only=True)
@@ -87,16 +98,23 @@ class CustomLoginSerializer(serializers.Serializer):
         identifier = attrs.get('identifier')
         password = attrs.get('password')
 
-        # Try to find user by email first (contains @) or username
+        # Try to determine if identifier is email
         try:
-            if '@' in identifier:
-                user = User.objects.get(email=identifier)
-            else:
+            validate_email(identifier)  
+            user = User.objects.get(email__iexact=identifier)
+        except ValidationError:
+            # Not an email → fallback to username
+            try:
                 user = User.objects.get(username=identifier)
+            except User.DoesNotExist:
+                raise serializers.ValidationError('Invalid credentials')
+        except User.MultipleObjectsReturned:
+            raise serializers.ValidationError('Multiple accounts found with this email')
         except User.DoesNotExist:
             raise serializers.ValidationError('Invalid credentials')
 
-        if not check_password(password, user.password):
+        # Check password
+        if not user.check_password(password):
             raise serializers.ValidationError('Invalid credentials')
 
         # Account approval check (skip for staff/admin)
@@ -107,6 +125,7 @@ class CustomLoginSerializer(serializers.Serializer):
         if not user.profile.role and not (user.is_staff or user.is_superuser):
             raise serializers.ValidationError('Role not assigned yet, contact admin')
 
+        # Generate tokens
         refresh = RefreshToken.for_user(user)
 
         request = self.context.get('request')
@@ -116,7 +135,6 @@ class CustomLoginSerializer(serializers.Serializer):
                 profile_picture_url = request.build_absolute_uri(user.profile.profile_picture.url)
             else:
                 profile_picture_url = user.profile.profile_picture.url  
-
 
         return {
             'refresh': str(refresh),
@@ -130,6 +148,7 @@ class CustomLoginSerializer(serializers.Serializer):
             'first_name': user.first_name,
             'last_name': user.last_name,
         }
+
 
 
 class EmailSerializer(serializers.Serializer):
@@ -152,24 +171,31 @@ class PasswordChangeSerializer(serializers.Serializer):
         confirm_password = data.get("confirm_password")
 
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
+        except MultipleObjectsReturned:
+            raise serializers.ValidationError("Multiple accounts found with this email. Please contact support.")
         except User.DoesNotExist:
             raise serializers.ValidationError("User with this email does not exist.")
 
-        # Custom password length check
+        # Password checks
         if len(password) < 5:
             raise serializers.ValidationError("Password must be at least 5 characters long.")
 
-        # Check if passwords match
         if password != confirm_password:
             raise serializers.ValidationError("Passwords do not match.")
 
-        # Check if new password is the same as the old one
         if user.check_password(password):
             raise serializers.ValidationError("New password cannot be the same as the old password.")
 
         data["user"] = user
         return data
+
+    def save(self, **kwargs):
+        user = self.validated_data["user"]
+        new_password = self.validated_data["password"]
+        user.set_password(new_password)
+        user.save()
+        return user
 
 
 
@@ -179,24 +205,23 @@ class ConfirmPasswordSerializer(serializers.Serializer):
     def validate_old_password(self, value):
         request = self.context['request']
         user = request.user
-        profile = user.profile
+        profile = getattr(user, "profile", None)
+
+        if not profile:
+            raise serializers.ValidationError("Profile not found for this user.")
 
         if not user.check_password(value):
             profile.failed_password_attempts += 1
-            profile.save()
-
-            remaining = 3 - profile.failed_password_attempts
 
             if profile.failed_password_attempts >= 3:
                 profile.failed_password_attempts = 0
                 profile.save()
-                # Raise non-field error for frontend logout
-                raise serializers.ValidationError(
-                    f"TOO_MANY_ATTEMPTS"
-                )
+                raise serializers.ValidationError({"non_field_errors": ["TOO_MANY_ATTEMPTS"]})
 
+            profile.save()
+            remaining = 3 - profile.failed_password_attempts
             raise serializers.ValidationError(
-                f"Incorrect password. {remaining} attempt(s) left."
+                {"old_password": [f"Incorrect password. {remaining} attempt(s) left."]}
             )
 
         # Correct password -> reset attempts
@@ -204,6 +229,7 @@ class ConfirmPasswordSerializer(serializers.Serializer):
         profile.last_password_verified_at = timezone.now()
         profile.save()
         return value
+
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -242,14 +268,12 @@ class ChangePasswordSerializer(serializers.Serializer):
 
     def save(self, **kwargs):
         user = self.context['request'].user
-        user.set_password(self.validated_data["new_password"])
-        user.save()
-
-        # Clear the verification timestamp
         profile = user.profile
-        profile.last_password_verified_at = None
-        profile.save()
-
+        with transaction.atomic():
+            user.set_password(self.validated_data["new_password"])
+            user.save()
+            profile.last_password_verified_at = None
+            profile.save()
         return user
 
 
@@ -263,7 +287,9 @@ class ProfilePictureSerializer(serializers.ModelSerializer):
         ext = os.path.splitext(value.name)[1].lower()
         allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
         if ext not in allowed_extensions:
-            raise serializers.ValidationError("Unsupported file extension. Use JPG, PNG, GIF, or WEBP.")
+            raise serializers.ValidationError(
+                "Unsupported file extension. Use JPG, PNG, GIF, or WEBP."
+            )
 
         # 2. Check actual file content (not just extension)
         file_type = imghdr.what(value)
@@ -273,9 +299,44 @@ class ProfilePictureSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
-        instance.profile_picture = validated_data.get('profile_picture', instance.profile_picture)
+        new_picture = validated_data.get('profile_picture')
+
+        if new_picture and instance.profile_picture:
+            # Ensure we don’t delete the default profile picture
+            if instance.profile_picture.name != 'profile_pics/default.jpg':
+                try:
+                    default_storage.delete(instance.profile_picture.name)
+                except Exception as e:
+                    logger.warning(f"Could not delete old profile picture: {e}")
+
+        # Save the new file
+        instance.profile_picture = new_picture or instance.profile_picture
         instance.save()
         return instance
+
+
+class ClearProfilePictureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Profile
+        fields = []
+
+    def update(self, instance, validated_data):
+        old_name = instance.profile_picture.name if instance.profile_picture else None
+
+        # Reset to default placeholder
+        instance.profile_picture = "profile_pics/default.jpg"
+        instance.save()
+
+        # Delete old file safely (not the default)
+        if old_name and old_name != "profile_pics/default.jpg":
+            try:
+                default_storage.delete(old_name)
+            except Exception as e:
+                logger.warning(f"Could not delete old profile picture: {e}")
+
+        return instance
+
+
 
 
 

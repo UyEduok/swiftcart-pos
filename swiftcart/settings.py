@@ -16,12 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security
 # -------------------------
 SECRET_KEY = config("SECRET_KEY", default="unsafe-secret")
-#DEBUG = config("DEBUG", default=True, cast=bool)
+# DEBUG = config("DEBUG", default=True, cast=bool)
 DEBUG = False
 
-
-# Allow localhost and local network IP
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "192.168.29.1"]
 
 # -------------------------
 # Email
@@ -105,6 +102,17 @@ ASGI_APPLICATION = "swiftcart.asgi.application"
 # -------------------------
 # Database
 # -------------------------
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.postgresql",
+#         "NAME": config("DB_NAME"),
+#         "USER": config("DB_USER"),
+#         "PASSWORD": config("DB_PASSWORD"),
+#         "HOST": config("DB_HOST", default="localhost"),
+#         "PORT": config("DB_PORT", default="5432"),
+#     }
+# }
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -113,8 +121,20 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD"),
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
+        "OPTIONS": {
+            "options": "-c timezone=Africa/Lagos"
+        },
     }
 }
+
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',  # Database file will be created in project root
+#     }
+# }
+
 
 # -------------------------
 # Password validation
@@ -158,18 +178,21 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # -------------------------
 # CORS & CSRF
 # -------------------------
-# CORS_ALLOWED_ORIGINS = [
-#     'http://localhost:80',
-#     'http://127.0.0.1',
-#     'http://192.168.29.1',  
-# ]
 
-# CSRF_TRUSTED_ORIGINS = [
-#     'http://192.168.29.1',
-# ]
-ALLOWED_HOSTS = ['*']
+CSRF_TRUSTED_ORIGINS = [
+    "http://172.20.10.4:8000",   # host machine's WiFi IP
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://uylove:8000",
+    "http://localhost:5173/"
+    "http://swiftcart:5173/"
+]
+
+ALLOWED_HOSTS = ["172.20.10.4", "127.0.0.1", "localhost", "uylove", "Uylove", "swiftcart"]
+
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
 
 
 # -------------------------
@@ -182,8 +205,8 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=7),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
@@ -206,6 +229,7 @@ APPEND_SLASH=True
 
 
 import os
+from logging.handlers import RotatingFileHandler
 
 LOGGING_DIR = os.path.join(BASE_DIR, "logs")
 if not os.path.exists(LOGGING_DIR):
@@ -227,8 +251,18 @@ LOGGING = {
     "handlers": {
         "file": {
             "level": "INFO",
-            "class": "logging.FileHandler",
+            "class": "logging.handlers.RotatingFileHandler",
             "filename": os.path.join(LOGGING_DIR, "app.log"),
+            "maxBytes": 10 * 1024 * 1024,  # 10 MB
+            "backupCount": 5,  # keep 5 old logs
+            "formatter": "verbose",
+        },
+        "error_file": {
+            "level": "ERROR",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(LOGGING_DIR, "errors.log"),
+            "maxBytes": 5 * 1024 * 1024,  # 5 MB
+            "backupCount": 3,  # keep 3 old logs
             "formatter": "verbose",
         },
         "console": {
@@ -236,12 +270,27 @@ LOGGING = {
             "formatter": "simple",
         },
     },
+    "root": {
+        "handlers": ["file", "error_file", "console"],
+        "level": "INFO",
+    },
     "loggers": {
-        "": {
+        "django": {
             "handlers": ["file", "console"],
             "level": "INFO",
+            "propagate": True,
+        },
+        "django.request": {
+            "handlers": ["error_file"],
+            "level": "ERROR",
+            "propagate": False,
         },
     },
 }
+
+
+TIME_ZONE = "Africa/Lagos"   # Nigeria timezone (UTC+1 / +1:00)
+USE_TZ = True            
+
 
 

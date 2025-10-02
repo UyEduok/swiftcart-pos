@@ -59,7 +59,6 @@ class ProductAdmin(admin.ModelAdmin):
         'updated_by_name',
         'updated_at',
         "product_image_preview",
-        "quantity",
         "product_code",
     )
 

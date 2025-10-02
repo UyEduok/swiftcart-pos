@@ -15,16 +15,15 @@ from django.contrib.auth.hashers import check_password
 from django.views import View
 from django.http import JsonResponse
 import json
-from rest_framework import status
 from .serializers import PasswordChangeSerializer
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
 from .serializers import ProfilePictureSerializer
 from .serializers import ProfileSerializer
 from .models import Profile
 from rest_framework.throttling import SimpleRateThrottle
+from .serializers import ClearProfilePictureSerializer
 
 
 class EmailRateThrottle(SimpleRateThrottle):
@@ -47,8 +46,6 @@ class EmailRateThrottle(SimpleRateThrottle):
             'scope': self.scope,
             'ident': email.lower()  
         }
-
-
 
 class PasswordChangeThrottle(UserRateThrottle):
     rate = "5/minute"  
@@ -207,6 +204,30 @@ def upload_profile_picture(request):
             },
             status=status.HTTP_200_OK
         )
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def clear_profile_picture(request):
+    profile = request.user.profile
+    serializer = ClearProfilePictureSerializer(profile, data={}, partial=True)
+
+    if serializer.is_valid():
+        serializer.save()
+
+        profile_picture_url = None
+        if profile.profile_picture and hasattr(profile.profile_picture, 'url'):
+            profile_picture_url = request.build_absolute_uri(profile.profile_picture.url)
+
+        return Response(
+            {
+                "detail": "Profile picture cleared successfully.",
+                "profile_picture": profile_picture_url
+            },
+            status=status.HTTP_200_OK
+        )
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

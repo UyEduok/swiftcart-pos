@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import RegisterUserView, CustomLoginView, SendResetCodeView,  upload_profile_picture
-from .views import VerifyResetCodeView, PasswordChangeView, confirm_password, change_password
+from .views import VerifyResetCodeView, PasswordChangeView, confirm_password, change_password, clear_profile_picture
 
 urlpatterns = [
     path('register/', RegisterUserView.as_view(), name='register'),
@@ -11,4 +11,5 @@ urlpatterns = [
     path("confirm-password/", confirm_password, name="confirm-password"),
     path("change-password/", change_password, name="change-password"),
     path("profile-picture/",  upload_profile_picture, name="profile-picture"),   
+    path("clear-picture/",  clear_profile_picture, name="clear-picture"), 
 ]
